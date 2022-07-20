@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """This is an example to train MAML-PPO on Maze environment."""
 # pylint: disable=no-value-for-parameter
+import random
+
 import click
 import torch
 from gym_miniworld.envs import MazeS3Fast, MazeS3, MazeS5
-
+from torch import nn
 import os
 from garage import wrap_experiment
 from garage.envs import GymEnv, normalize
@@ -14,17 +16,18 @@ from garage.experiment.task_sampler import SetTaskSampler
 from garage.sampler import RaySampler, VecWorker, LocalSampler, CustomLocalSampler, CustomVecWorker
 from garage.torch.algos import MAMLPPO, MAMLTRPO
 from garage.torch.policies import CategoricalCNNPolicy, ResNetCNNPolicy
-from garage.torch.value_functions import GaussianMLPValueFunction
+from garage.torch.value_functions import GaussianMLPValueFunction, ResNetMLPValueFunction
 from garage.trainer import Trainer
 from garage.torch import set_gpu_mode
 from environments import habitat_envs
+from datetime import datetime
 import numpy as np
 import gym
 import akro
 import habitat.utils.gym_definitions
 
 @click.command()
-@click.option('--seed', default=27)
+@click.option('--seed', default=datetime.now())
 @click.option('--epochs', default=20)
 @click.option('--episodes_per_task', default=1)
 @click.option('--meta_batch_size', default=1)
@@ -51,32 +54,41 @@ def maml_ppo_resnet_maze(ctxt, seed, epochs, episodes_per_task,
         meta_batch_size (int): Number of tasks sampled per batch.
 
     """
-    # gym_env = gym.make("HabitatCloseCab-v0")
-    set_seed(seed)
-    env = GymEnv(habitat_envs.SimpleRLEnvRGB(config_paths="configs/tasks/pointnav.yaml",
-                                          result_path=os.path.join("development", "images")),
+    # random.seed(seed)
+    # seed = random.randint(0, 2**64)
+    # set_seed(seed)
+    env = GymEnv(habitat_envs.HM3DRLEnv(result_path=os.path.join("development", "images")),
                                           is_image=True,
                                           max_episode_length=max_episode_length)
-    # env = GymEnv(habitat_envs.SimpleRLEnv(),
-    #              is_image=True,
-    #              max_episode_length=max_episode_length)
+    # env = GymEnv(habitat_envs.HM3DRLEnv(config_paths="configs/tasks/pointnav.yaml",
+    #                                       result_path=os.path.join("development", "images")),
+    #                                       is_image=True,
+    #                                       max_episode_length=max_episode_length)
 
     policy = ResNetCNNPolicy(
         env_spec=env.spec,
         hidden_nonlinearity=torch.relu,
-        hidden_sizes=(512, 256)
+        hidden_sizes=(128, 128),
+        output_w_init=lambda x: nn.init.normal_(x, mean=1.0, std=0.01),
+        output_b_init=nn.init.zeros_
     )
 
     value_function = GaussianMLPValueFunction(env_spec=env.spec,
-                                              hidden_sizes=(32, 32),
+                                              hidden_sizes=(128, 128),
                                               hidden_nonlinearity=torch.tanh,
                                               output_nonlinearity=None,
                                               is_image=True)
 
+    # value_function = ResNetMLPValueFunction(env_spec=env.spec,
+    #                                           hidden_sizes=(128, 128),
+    #                                           hidden_nonlinearity=torch.tanh,
+    #                                           output_nonlinearity=None,
+    #                                           is_image=True)
+
     # task_sampler = SetTaskSampler(
     #     habitat_envs.SimpleRLEnv,
     #     wrapper=lambda env, _: GymEnv(env, is_image=True, max_episode_length=max_episode_length))
-    task_sampler = SetTaskSampler(env_constructor=habitat_envs.SimpleRLEnvRGB,
+    task_sampler = SetTaskSampler(env_constructor=habitat_envs.HM3DRLEnv,
                                   env=env,
                                   wrapper=lambda env, _: GymEnv(env, is_image=True, max_episode_length=max_episode_length))
 
