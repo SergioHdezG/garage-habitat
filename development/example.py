@@ -2,8 +2,9 @@ from environments import habitat_envs
 from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 import os
 
-env = habitat_envs.SimpleRLEnvRGB(config_paths="configs/tasks/pointnav.yaml",
-                               result_path=os.path.join("development", "images"))
+# env = habitat_envs.SimpleRLEnvRGB(config_paths="configs/tasks/pointnav.yaml",
+#                                result_path=os.path.join("development", "images"))
+env = habitat_envs.HM3DRLEnv()
 
 goal_radius = env.episodes[0].goals[0].radius
 if goal_radius is None:

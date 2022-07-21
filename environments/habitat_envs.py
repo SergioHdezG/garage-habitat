@@ -473,6 +473,9 @@ class HM3DRLEnv(habitat.RLEnv):
         self.config_path = config_paths
 
         config = habitat.get_config(config_paths=config_paths)
+        config.defrost()
+        config.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.freeze()
 
         super().__init__(config=config)
         self.episode_counter = 0
@@ -533,7 +536,7 @@ class HM3DRLEnv(habitat.RLEnv):
         self.episode_images.append(output_im)
 
         reward = self._get_reward(info['distance_to_goal'])
-        return observation['rgb']  #, observation['pointgoal_with_gps_compass']], reward, done, info
+        return observation['rgb'], reward, done, info  #, observation['pointgoal_with_gps_compass']], reward, done, info
         # cuidado con el formato de la
         # observación porque si no esta bien te hace un flatten en el get_action() de garage/src/garage/torch/policies/
         # sthocastic_policy.py

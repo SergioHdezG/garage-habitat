@@ -9,12 +9,13 @@ import random
 import copy
 import os
 
+from torch import nn
 from garage import wrap_experiment
 from garage.envs import GymEnv
 from garage.experiment.deterministic import set_seed
 from garage.sampler import RaySampler, LocalSampler
 from garage.torch.algos import PPO
-from garage.torch.policies import GaussianMLPPolicy
+from garage.torch.policies import CategoricalCNNPolicy, ResNetCNNPolicy
 from garage.torch.value_functions import GaussianMLPValueFunction
 from garage.trainer import Trainer
 from environments import habitat_envs
@@ -54,15 +55,19 @@ def ppo_on_habitat(ctxt, seed, epochs, num_train_per_epoch, batch_size, max_epis
                  is_image=True,
                  max_episode_length=max_episode_length)
 
-    policy = GaussianMLPPolicy(copy.deepcopy(env.spec),
-                               hidden_sizes=[64, 64],
-                               hidden_nonlinearity=torch.tanh,
-                               output_nonlinearity=None)
+    policy = ResNetCNNPolicy(copy.deepcopy(env.spec),
+                             hidden_nonlinearity=torch.relu,
+                             hidden_sizes=(128, 128),
+                             output_w_init=lambda x: nn.init.normal_(x, mean=0.0, std=0.01),
+                             output_b_init=nn.init.zeros_)
 
     value_function = GaussianMLPValueFunction(env_spec=env.spec,
                                               hidden_sizes=(32, 32),
                                               hidden_nonlinearity=torch.tanh,
-                                              output_nonlinearity=None)
+                                              output_nonlinearity=None,
+                                              is_image=True # Si is_image=True le hace un flatten.
+                                              # En garage/torch/values_function/gaussian_mlp_value_function.py en forward()
+                                              )
 
     trainer = Trainer(ctxt)
 
