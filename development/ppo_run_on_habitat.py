@@ -16,7 +16,7 @@ from garage.experiment.deterministic import set_seed
 from garage.sampler import RaySampler, LocalSampler
 from garage.torch.algos import PPO
 from garage.torch.policies import CategoricalCNNPolicy, ResNetCNNPolicy
-from garage.torch.value_functions import GaussianMLPValueFunction
+from garage.torch.value_functions import GaussianMLPValueFunction, ResNetMLPValueFunction
 from garage.trainer import Trainer
 from environments import habitat_envs
 from datetime import datetime
@@ -24,8 +24,8 @@ from garage.torch.optimizers import OptimizerWrapper
 
 @click.command()
 @click.option('--seed', default=datetime.now())
-@click.option('--epochs', default=20)
-@click.option('--num_train_per_epoch', default=20)
+@click.option('--epochs', default=1)
+@click.option('--num_train_per_epoch', default=2)
 @click.option('--batch_size', default=2)
 @click.option('--max_episode_length', default=10)
 @click.option('--n_workers', default=1)
@@ -48,9 +48,10 @@ def ppo_on_habitat(ctxt, seed, epochs, num_train_per_epoch, batch_size, max_epis
         batch_size (int): Number of tasks sampled per batch.
 
     """
-    random.seed(seed)
-    seed = random.randint(0, 2**64)
-    set_seed(seed)
+
+    # random.seed(seed)
+    # seed = random.randint(0, 2**64)
+    # set_seed(seed)
     env = GymEnv(habitat_envs.HM3DRLEnv(),
                  is_image=True,
                  max_episode_length=max_episode_length)
@@ -61,12 +62,23 @@ def ppo_on_habitat(ctxt, seed, epochs, num_train_per_epoch, batch_size, max_epis
                              output_w_init=lambda x: nn.init.normal_(x, mean=0.0, std=0.01),
                              output_b_init=nn.init.zeros_)
 
-    value_function = GaussianMLPValueFunction(env_spec=env.spec,
+    # value_function = GaussianMLPValueFunction(env_spec=env.spec,
+    #                                           hidden_sizes=(32, 32),
+    #                                           hidden_nonlinearity=torch.tanh,
+    #                                           output_nonlinearity=None,
+    #                                           is_image=True # Si is_image=True le hace un flatten.
+    #                                           # En garage/torch/values_function/gaussian_mlp_value_function.py en forward()
+    #                                           )
+
+    value_function = ResNetMLPValueFunction(env_spec=env.spec,
                                               hidden_sizes=(32, 32),
                                               hidden_nonlinearity=torch.tanh,
+                                              output_w_init=lambda x: nn.init.normal_(x, mean=0.0, std=0.01),
+                                              output_b_init=nn.init.zeros_,
                                               output_nonlinearity=None,
-                                              is_image=True # Si is_image=True le hace un flatten.
+                                              is_image=True, # Si is_image=True le hace un flatten.
                                               # En garage/torch/values_function/gaussian_mlp_value_function.py en forward()
+                                              resnet=policy._resnet_module
                                               )
 
     trainer = Trainer(ctxt)
@@ -97,11 +109,8 @@ def ppo_on_habitat(ctxt, seed, epochs, num_train_per_epoch, batch_size, max_epis
                stop_entropy_gradient=False,
                entropy_method='no_entropy')
 
-    # del env  # elimino el entornoj de memoria porque ya no hace falta # hace falta que se mantenga las variables de contxto de openGL, no se puede borrar sin tener ciertas cosas en cuenta.
-
     # trainer.setup(algo, env)
-    trainer.setup(algo, None)  # quizás así no funcione al intentar renderizar el entorno para ver las ejecuciones ya
-    # que env se usa en get_env_copy() que se llama desde _start_worker en la intrucción de plotting
+    trainer.setup(algo, None)
 
     trainer.train(n_epochs=epochs, batch_size=batch_size)
 
