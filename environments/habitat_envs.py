@@ -461,8 +461,184 @@ class PointNavHabitatSimple(Environment):
         self._visualize = True
         print(self.render('text', print_on_screen=self._visualize))
 
-
 class HM3DRLEnv(habitat.RLEnv):
+
+    def __init__(self, config_paths="configs/RL/objectnav_hm3d_RL.yaml",  result_path=os.path.join("development", "images"),
+                 task=None):
+        print(f"{bcolors.OKBLUE}Creando un nuevo entorno.{bcolors.ENDC}")
+
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
+        self.result_path = result_path
+        self.config_path = config_paths
+
+        config = habitat.get_config(config_paths=config_paths)
+        config.defrost()
+        config.TASK.MEASUREMENTS.append("TOP_DOWN_MAP")
+        config.freeze()
+
+        super().__init__(config=config)
+        self.episode_counter = 0
+        self.episode_results_path = self.result_path
+        self.episode_images = []
+
+        self.metadata = {
+            'render.modes': ['rgb']
+        }
+        self.action_space = spaces.Discrete(6)  # FORWARD, LEFT, RIGHT, LOOK_UP, LOOK_DOWN, STOP
+        self.action_list = [HabitatSimActions.MOVE_FORWARD,
+                            HabitatSimActions.TURN_LEFT,
+                            HabitatSimActions.TURN_RIGHT,
+                            HabitatSimActions.LOOK_UP,
+                            HabitatSimActions.LOOK_DOWN,
+                            HabitatSimActions.STOP]
+
+        # self.observation_space = spaces.Tuple((spaces.Box(low=0, high=255, shape=(480, 640, 3), dtype=np.uint8),
+        #                                        spaces.Box(low=-20.0, high=20.0, shape=(2,), dtype=np.float32)))
+        self.observation_space = spaces.Box(low=0, high=255, shape=(480, 640, 3), dtype=np.uint8)
+
+        self._task = task
+        self._generator = None
+
+
+    def reset(self):
+        print(f"{bcolors.OKCYAN} Reseteando el entorno.{bcolors.ENDC}")
+
+        # Al final de cada episodio guardar un video del recorido del robot
+        if len(self.episode_images) > 0:
+            images_to_video(self.episode_images, self.episode_results_path, "trajectory")
+
+        self.episode_images = []
+        observation = super().reset()
+
+        self.episode_counter += 1
+
+        # Definir ruta paga guardar las ejecuciones
+        self.episode_results_path = os.path.join(
+            self.result_path, "shortest_path_example", "%02d" % self.episode_counter
+        )
+
+        if os.path.exists(self.episode_results_path):
+            shutil.rmtree(self.episode_results_path)
+        os.makedirs(self.episode_results_path)
+
+        return observation['rgb']  # observation['pointgoal_with_gps_compass']] # cuidado con el formato de la
+        # observación porque si no esta bien te hace un flatten en el get_action() de garage/src/garage/torch/policies/
+        # sthocastic_policy.py
+
+    def step(self, *args, **kwargs):
+        observation, reward, done, info = super().step(*args, **kwargs)
+
+        # Guardar video de las ejecuciones en un archivo
+        im = observation["rgb"]
+        top_down_map = self._draw_top_down_map(info, im.shape[0])
+        output_im = np.concatenate((im, top_down_map), axis=1)
+        self.episode_images.append(output_im)
+
+        reward = self._get_reward(info['distance_to_goal'])
+        return observation['rgb'], reward, done, info  #, observation['pointgoal_with_gps_compass']], reward, done, info
+        # cuidado con el formato de la
+        # observación porque si no esta bien te hace un flatten en el get_action() de garage/src/garage/torch/policies/
+        # sthocastic_policy.py
+
+    def render(self, mode: str = "rgb", print_on_screen=False):
+        image = super().render(mode=mode)
+
+        if print_on_screen:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            cv2.imshow(self.episode_results_path, image)
+            cv2.waitKey(1)
+        return image
+
+    def get_reward_range(self):
+        return [-20, 0]
+
+    # Obligatorio: solo recibe la observación, por lo que es muy dificil proponer una recompensa
+    def get_reward(self, observations):
+        return 0
+
+    # Calcula la recompensa real en función a la distancia con el punto objetivo
+    def _get_reward(self, distance2goal):
+        return - distance2goal
+
+    def get_done(self, observations):
+        return self.habitat_env.episode_over
+
+    def get_info(self, observations):
+        return self.habitat_env.get_metrics()
+
+    def _draw_top_down_map(self, info, output_size):
+        return maps.colorize_draw_agent_and_fit_to_height(
+            info["top_down_map"], output_size
+        )
+
+    def sample_tasks(self, num_tasks):
+        generators = [np.random.random((2,)) for _ in range(num_tasks)]
+        tasks = [{'generator': generator} for generator in generators]
+        return tasks
+
+    def set_task(self, task):
+        self._task = task
+        self._generator = task['generator']
+
+    def __getstate__(self):
+        """See `Object.__getstate__.
+
+        Returns:
+            dict: The instance’s dictionary to be pickled.
+
+        """
+        config_paths = copy.copy(self.config_path)
+        result_path = copy.copy(self.result_path)
+        return dict(config_paths=config_paths, result_path=result_path, task=self._task)
+
+    def __setstate__(self, state):
+        """See `Object.__setstate__.
+
+        Args:
+            state (dict): Unpickled state of this object.
+
+        """
+        self.__init__(config_paths=state['config_paths'], result_path=state['result_path'], task=state['task'])
+
+    # def __deepcopy__(self, memodict={}):
+    #     config_paths = copy.copy(self.config_path)
+    #     result_path = copy.copy(self.result_path)
+    #     copied_env = type(self)(config_paths=config_paths, result_path=result_path)
+    #     # memodict[id(self)] = copied_env
+    #     # copy._member1 = self._member1
+    #     # copy._member2 = deepcopy(self._member2, memo)
+    #
+    #     # TODO [sergio]: Esta copied_env._np_random es supceptible de ser cambiada o modificada entre tareas
+    #     copied_env._np_random = copy.deepcopy(self._np_random)
+    #     copied_env._core_env_config = copy.deepcopy(copied_env._core_env_config)
+    #     copied_env = deepcopy_habitat_RLEnv(copied_env, self)
+    #
+    #     copied_env.action_space = copy.deepcopy(self.action_space)
+    #     # TODO [sergio]: Esta copied_env.config es supceptible de ser cambiada o modificada entre tareas
+    #     # copied_env.config = copy.copy(self.config)  # copy # no puedo copiarlo
+    #     copied_env.config_path = copy.deepcopy(self.config_path)
+    #     # copied_env.current_episode = copy.copy(self.current_episode)  # copy # no puedo copiarlo
+    #     copied_env.episode_counter = copy.deepcopy(self.episode_counter)
+    #     copied_env.episode_images = copy.deepcopy(self.episode_images)
+    #     # TODO [sergio]: Esta copied_env.episode_results_path es supceptible de ser cambiada o modificada entre tareas
+    #     copied_env.episode_results_path = copy.deepcopy(self.episode_results_path)  # copy # no puedo copiarlo
+    #     copied_env.episodes = copy.deepcopy(self.episodes)
+    #     # copied_env.habitat_env = copy.copy(self.habitat_env)  # copy # no puedo copiarlo
+    #     copied_env.metadata = copy.deepcopy(self.metadata)
+    #     copied_env.number_of_episodes = copy.deepcopy(self.number_of_episodes)
+    #     copied_env.observation_space = copy.deepcopy(self.observation_space)
+    #     # TODO [sergio]: Esta copied_env.results_path es supceptible de ser cambiada o modificada entre tareas
+    #     copied_env.result_path = copy.deepcopy(self.result_path)
+    #     copied_env.reward_range = copy.deepcopy(self.reward_range)
+    #     copied_env.spec = copy.deepcopy(self.spec)
+    #
+    #     return copied_env
+
+class HM3DMetaRLEnv(habitat.RLEnv):
+    """
+    En cada reset se crea una escena nueva y un objetivo nuevo. Falta que esto se realize en la asignación de tarea.
+    """
     def __init__(self, config_paths="configs/tasks/objectnav_hm3d.yaml",  result_path=os.path.join("development", "images"),
                  task=None):
         print(f"{bcolors.OKBLUE}Creando un nuevo entorno.{bcolors.ENDC}")

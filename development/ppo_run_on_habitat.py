@@ -24,8 +24,8 @@ from garage.torch.optimizers import OptimizerWrapper
 
 @click.command()
 @click.option('--seed', default=datetime.now())
-@click.option('--epochs', default=1)
-@click.option('--num_train_per_epoch', default=2)
+@click.option('--epochs', default=10)
+@click.option('--num_train_per_epoch', default=5)
 @click.option('--batch_size', default=2)
 @click.option('--max_episode_length', default=10)
 @click.option('--n_workers', default=1)
